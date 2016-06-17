@@ -9,14 +9,10 @@ that can actually be used by non-humans.
 """
 
 import argparse
+import cStringIO as io
+import logging
 import re
 import pandas as pd
-
-try:
-  import io
-except ImportError:
-  # Python 2
-  import cStringIO as io
 
 description = "Parse the (horrible) output of STRUCTURE into something nicer."
 parser = argparse.ArgumentParser(description)
@@ -39,7 +35,7 @@ class StructureResultsBlock(object):
     self.raw_lines.append(line)
 
   def finish(self):
-    data = io.StringIO("".join(self.raw_lines))
+    data = io.StringIO("".join(self.raw_lines).decode("ascii"))
     df = pd.read_table(data, delim_whitespace=True, header=None)
     return df
 
@@ -120,10 +116,12 @@ def read_structure_from(lines):
 
 
 def main(args):
+  logging.basicConfig(level=logging.INFO)
+
   with open(args.structure_output_file) as f:
     results = read_structure_from(f)
 
-  print(results['InferredAncestry'])
+  logging.info(results)
 
 if __name__ == "__main__":
   main(parser.parse_args())
