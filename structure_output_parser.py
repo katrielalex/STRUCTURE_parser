@@ -38,13 +38,29 @@ class StructureResultsBlock(object):
   def append(self, line):
     self.raw_lines.append(line)
 
-  def to_dataframe(self):
+  def finish(self):
     data = io.StringIO("".join(self.raw_lines))
     df = pd.read_table(data, delim_whitespace=True, header=None)
     return df
 
   def is_end(self, line):
     return re.match("^-*$", line)
+
+
+class InferredAncestryPop0Block(StructureResultsBlock):
+  """Special-cased block for the inferred ancestry of population 0."""
+
+  def __init__(self):
+    StructureResultsBlock.__init__(self,
+                                   "InferredAncestry",
+                                   "Inferred ancestry",
+                                   2)
+
+  def append(self, line):
+    self.raw_lines.append(line.split(":")[1].lstrip())
+
+  def is_end(self, line):
+    return line.split()[3] != "0"
 
 
 def read_structure_from(lines):
@@ -65,6 +81,7 @@ def read_structure_from(lines):
       StructureResultsBlock("ClusterMembership", "Proportion of membership", 5),
       StructureResultsBlock("AFDivergence", "Net nucleotide distance", 3),
       StructureResultsBlock("Heterozygosity", "expected heterozygosity", 1),
+      InferredAncestryPop0Block(),
   ]
 
   current_block = None
@@ -79,7 +96,7 @@ def read_structure_from(lines):
     # If we're in the middle of a block, just read the next line blindly
     if current_block:
       if current_block.is_end(line.strip()):
-        results[current_block.name] = current_block.to_dataframe()
+        results[current_block.name] = current_block.finish()
         current_block = None
       else:
         current_block.append(line)
@@ -106,7 +123,7 @@ def main(args):
   with open(args.structure_output_file) as f:
     results = read_structure_from(f)
 
-  print(results)
+  print(results['InferredAncestry'])
 
 if __name__ == "__main__":
   main(parser.parse_args())
