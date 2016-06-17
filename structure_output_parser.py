@@ -9,108 +9,105 @@ that can actually be used by non-humans.
 """
 
 import argparse
-import pandas as pd
 import re
+import pandas as pd
 
 try:
-    import io
+  import io
 except ImportError:
-    # Python 2
-    import cStringIO as io
+  # Python 2
+  import cStringIO as io
 
-description = "Parse the (horrible) output of STRUCTURE into a machine-readable format"
+description = "Parse the (horrible) output of STRUCTURE into something nicer."
 parser = argparse.ArgumentParser(description)
 parser.add_argument("structure_output_file", help="Output STRUCTURE file")
 
-class StructureResults(dict):
-    def __init__(self):
-        self._facts = {}
-
-    def add(self, description, fact):
-        self._facts[description] = fact
 
 class StructureResultsBlock(object):
-    def __init__(self, name, regex, n_lines_after_regex):
-        self.name = name
-        self.matcher = re.compile(regex)
-        self.n_lines_after_regex = n_lines_after_regex
-        self.raw_lines = []
+  """Represents, effectively, a dataframe embedded in the STRUCTURE output."""
 
-    def match(self, value):
-        return self.matcher.search(value)
+  def __init__(self, name, regex, n_lines_after_regex):
+    self.name = name
+    self.matcher = re.compile(regex)
+    self.n_lines_after_regex = n_lines_after_regex
+    self.raw_lines = []
 
-    def append(self, line):
-        self.raw_lines.append(line)
+  def match(self, value):
+    return self.matcher.search(value)
 
-    def to_dataframe(self):
-        data = io.StringIO("".join(self.raw_lines))
-        df = pd.read_table(data, delim_whitespace=True, header=None)
-        return df
+  def append(self, line):
+    self.raw_lines.append(line)
 
-    def is_end(self, line):
-        return re.match('^-*$', line)
+  def to_dataframe(self):
+    data = io.StringIO("".join(self.raw_lines))
+    df = pd.read_table(data, delim_whitespace=True, header=None)
+    return df
 
-def readStructureValuesFrom(lines):
-    results = StructureResults()
-    numeric_values = {name: re.compile(value) for name, value in {
-        'indivs' : r'^(\d+) individuals.*$',
-        'loci'   : r'^(\d+) loci.*$',
-        'k'      : r'^(\d+) populations assumed.*$',
-        'burnin' : r'^(\d+) Burn\-in period.*$',
-        'reps'   : r'^(\d+) Reps.*$',
-        # nan, inf
-        'lnprob' : r'^Estimated Ln Prob of Data\s+=\s+([\d.$nainf-]+).*$',
-        'meanln' : r'^Mean value of ln likelihood\s+=\s+([\d.$nainf-]+).*$',
-        'varln'  : r'^Variance of ln likelihood\s+=\s+([\d.$nainf-]+).*$',
-    }.items()}  # Pinched from StructureHarvester
-    blocks = [
-        StructureResultsBlock("ClusterMembership", "Proportion of membership", 5),
-        StructureResultsBlock("AFDivergence", "Net nucleotide distance", 3),
-        StructureResultsBlock("Heterozygosity", "expected heterozygosity", 1),
-    ]
+  def is_end(self, line):
+    return re.match("^-*$", line)
 
-    currentBlock = None
-    skipLines = 0
 
-    for line in lines:
-        # Skip lines if we were told to do so
-        if skipLines:
-            skipLines -= 1
-            continue
-        
-        # If we're in the middle of a block, just read the next line blindly
-        if currentBlock:
-            if currentBlock.is_end(line.strip()):
-                results[currentBlock.name] = currentBlock.to_dataframe()
-                currentBlock = None
-            else:
-                currentBlock.append(line)
-            continue
-            
-        # Check if we're reading a numeric value
-        for name, value in numeric_values.items():
-            match = value.match(line)
-            if match:
-                results[name] = match.group(1)
-                break
+def read_structure_from(lines):
+  """Attempt to parse some sense into the STRUCTURE output file |lines|."""
+  results = {}
+  numeric_values = {name: re.compile(value) for name, value in {
+      "indivs": r"^(\d+) individuals.*$",
+      "loci": r"^(\d+) loci.*$",
+      "k": r"^(\d+) populations assumed.*$",
+      "burnin": r"^(\d+) Burn\-in period.*$",
+      "reps": r"^(\d+) Reps.*$",
+      # nan, inf
+      "lnprob": r"^Estimated Ln Prob of Data\s+=\s+([\d.$nainf-]+).*$",
+      "meanln": r"^Mean value of ln likelihood\s+=\s+([\d.$nainf-]+).*$",
+      "varln": r"^Variance of ln likelihood\s+=\s+([\d.$nainf-]+).*$",
+  }.items()}  # Pinched from StructureHarvester
+  blocks = [
+      StructureResultsBlock("ClusterMembership", "Proportion of membership", 5),
+      StructureResultsBlock("AFDivergence", "Net nucleotide distance", 3),
+      StructureResultsBlock("Heterozygosity", "expected heterozygosity", 1),
+  ]
 
-        # Check if we're reading something that should start a block
-        for block in blocks:
-            if block.match(line):
-                currentBlock = block
-                skipLines = block.n_lines_after_regex
-                continue
+  current_block = None
+  skip_lines = 0
 
-    return results
+  for line in lines:
+    # Skip lines if we were told to do so
+    if skip_lines:
+      skip_lines -= 1
+      continue
 
-    
+    # If we're in the middle of a block, just read the next line blindly
+    if current_block:
+      if current_block.is_end(line.strip()):
+        results[current_block.name] = current_block.to_dataframe()
+        current_block = None
+      else:
+        current_block.append(line)
+      continue
+
+    # Check if we're reading a numeric value
+    for name, value in numeric_values.items():
+      match = value.match(line)
+      if match:
+        results[name] = match.group(1)
+        break
+
+    # Check if we're reading something that should start a block
+    for block in blocks:
+      if block.match(line):
+        current_block = block
+        skip_lines = block.n_lines_after_regex
+        continue
+
+  return results
+
+
 def main(args):
-    with open(args.structure_output_file) as f:
-        results = readStructureValuesFrom(f)
+  with open(args.structure_output_file) as f:
+    results = read_structure_from(f)
 
-    print(results)
+  print(results)
 
 if __name__ == "__main__":
-    args = parser.parse_args()
-    main(args)
+  main(parser.parse_args())
 
